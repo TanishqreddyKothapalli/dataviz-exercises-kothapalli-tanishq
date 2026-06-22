@@ -5,9 +5,7 @@ import plotly.graph_objects as go
 from pathlib import Path
 import datetime
 
-# ─────────────────────────────────────────────
-# Page config
-# ─────────────────────────────────────────────
+
 st.set_page_config(
     page_title="CO2 Dashboard",
     page_icon="🌱",
@@ -15,13 +13,9 @@ st.set_page_config(
 )
 
 
-# ─────────────────────────────────────────────
-# Load data
-# ─────────────────────────────────────────────
 @st.cache_data
 def load_data():
-
-    path = Path(__file__).parent / "co2_emissions.csv"
+    path = Path(__file__).parent.parent / "data" / "co2_emissions.csv"
 
     df = pd.read_csv(path)
 
@@ -35,24 +29,17 @@ def load_data():
 df = load_data()
 
 
-# ─────────────────────────────────────────────
-# Header
-# ─────────────────────────────────────────────
 st.title("🌱 CO2 Emissions Explorer")
+
 st.caption(
     "Source: Our World in Data — ourworldindata.org/co2-emissions"
 )
 
 
-# ─────────────────────────────────────────────
-# Sidebar filters
-# ─────────────────────────────────────────────
 with st.sidebar:
 
     st.header("Filters")
 
-
-    # Region selectbox
     regions = ["All"] + sorted(
         df["Region"].dropna().unique()
     )
@@ -63,7 +50,6 @@ with st.sidebar:
     )
 
 
-    # Country multiselect chained to region
     if selected_region == "All":
 
         country_options = sorted(
@@ -88,16 +74,15 @@ with st.sidebar:
     )
 
 
-    # Year range
-    year_range = st.slider(
-        "Year range",
-
-        int(df["Year"].min()),
-        int(df["Year"].max()),
-
-        (
-            int(df["Year"].min()),
-            int(df["Year"].max())
+    date_range = st.date_input(
+        "Date range",
+        value=(
+            datetime.date(
+                int(df["Year"].min()),1,1
+            ),
+            datetime.date(
+                int(df["Year"].max()),1,1
+            )
         )
     )
 
@@ -116,257 +101,97 @@ with st.sidebar:
     )
 
 
-
-# ─────────────────────────────────────────────
-# Guards
-# ─────────────────────────────────────────────
-
 if not selected_countries:
-
-    st.warning(
-        "👆 Select at least one country."
-    )
-
+    st.warning("Select at least one country.")
     st.stop()
 
 
+start = pd.Timestamp(date_range[0])
+end = pd.Timestamp(date_range[1])
 
-# ─────────────────────────────────────────────
-# Filtering
-# ─────────────────────────────────────────────
 
 filtered = df[
     (df["Country"].isin(selected_countries))
     &
-    (df["Year"] >= year_range[0])
+    (df["Date"] >= start)
     &
-    (df["Year"] <= year_range[1])
+    (df["Date"] <= end)
 ]
 
 
 if filtered.empty:
-
-    st.warning(
-        "No data available for selected filters."
-    )
-
+    st.warning("No data available.")
     st.stop()
 
-
-
-# Metric selection
 
 if metric == "Total CO2 (Mt)":
 
     y_col = "CO2_Mt"
-    y_label = "CO2 Emissions (Mt)"
 
 else:
 
     y_col = "CO2_per_capita"
-    y_label = "CO2 per Capita (t)"
 
 
 
-first_year = filtered["Year"].min()
 last_year = filtered["Year"].max()
 
+first_year = filtered["Year"].min()
 
-
-# ─────────────────────────────────────────────
-# Filter summary
-# ─────────────────────────────────────────────
-
-st.caption(
-    f"""
-    **{len(selected_countries)} countries**
-    |
-    Region: {selected_region}
-    |
-    {first_year} - {last_year}
-    |
-    {metric}
-    """
-)
-
-
-
-# ─────────────────────────────────────────────
-# KPI calculations
-# ─────────────────────────────────────────────
-
-first_data = filtered[
-    filtered["Year"] == first_year
-]
 
 last_data = filtered[
     filtered["Year"] == last_year
 ]
 
 
-total_first = first_data[y_col].sum()
-
-total_last = last_data[y_col].sum()
+total = last_data[y_col].sum()
 
 
-change = (
-    (total_last-total_first)
-    /
-    total_first
-    *
-    100
-) if total_first else 0
-
-
-
-ranked = (
+top_country = (
     last_data
-    .groupby("Country")[y_col]
-    .sum()
-    .sort_values(
-        ascending=False
-    )
+    .sort_values(y_col, ascending=False)
+    .iloc[0]["Country"]
 )
 
 
-
-top_country = ranked.index[0]
-
-top_value = ranked.iloc[0]
-
-
-
-c1, c2, c3 = st.columns(3)
-
+c1,c2,c3 = st.columns(3)
 
 
 c1.metric(
-    f"Total {metric} ({last_year})",
-    f"{total_last:,.0f}"
+    "Total",
+    f"{total:,.0f}"
 )
 
 
 c2.metric(
-    "Change",
-    f"{change:+.1f}%"
+    "Year",
+    last_year
 )
 
 
 c3.metric(
-    f"Highest {metric}",
-    top_country,
-    help=f"{top_value:,.0f}"
+    "Top emitter",
+    top_country
 )
 
 
-
-st.divider()
-
+left,right = st.columns([2,1])
 
 
-# ─────────────────────────────────────────────
-# Charts
-# ─────────────────────────────────────────────
-
-left, right = st.columns(
-    [2,1]
-)
-
-
-
-# LINE CHART
 with left:
 
+    fig = px.line(
+        filtered.sort_values(
+            ["Country","Year"]
+        ),
+        x="Date",
+        y=y_col,
+        color="Country"
+    )
 
-    if highlight_top:
-
-
-        top_country = (
-            filtered
-            .groupby("Country")[y_col]
-            .sum()
-            .idxmax()
-        )
-
-
-        fig = go.Figure()
-
-
-        for country in filtered["Country"].unique():
-
-
-            temp = filtered[
-                filtered["Country"] == country
-            ]
-
-
-            fig.add_trace(
-                go.Scatter(
-
-                    x=temp["Date"],
-
-                    y=temp[y_col],
-
-                    mode="lines",
-
-                    name=country,
-
-
-                    line=dict(
-
-                        color=
-                        "#2E75B6"
-                        if country == top_country
-                        else "#CCCCCC",
-
-                        width=
-                        3
-                        if country == top_country
-                        else 1
-                    )
-                )
-            )
-
-
-        fig.update_layout(
-
-            title=
-            f"<b>{top_country} leads {y_label}</b>",
-
-            plot_bgcolor="white",
-
-            paper_bgcolor="white"
-        )
-
-
-    else:
-
-
-        fig = px.line(
-
-            filtered.sort_values(
-                ["Country","Year"]
-            ),
-
-            x="Date",
-
-            y=y_col,
-
-            color="Country",
-
-            title=
-            f"<b>{y_label} over time</b>"
-        )
-
-
-        fig.update_layout(
-
-            plot_bgcolor="white",
-
-            paper_bgcolor="white"
-        )
-
-
+    fig.update_layout(
+        plot_bgcolor="white"
+    )
 
     st.plotly_chart(
         fig,
@@ -374,54 +199,28 @@ with left:
     )
 
 
-
-
-# BAR CHART
-
 with right:
 
-
-    bar_data = (
-
+    ranking = (
         last_data
         .groupby("Country")[y_col]
         .sum()
-        .sort_values()
-        .tail(15)
         .reset_index()
-
+        .sort_values(
+            y_col
+        )
     )
 
 
     fig2 = px.bar(
-
-        bar_data,
-
+        ranking,
         x=y_col,
-
         y="Country",
-
-        orientation="h",
-
-        title=
-        f"<b>Ranking {last_year}</b>"
-    )
-
-
-    fig2.update_layout(
-
-        plot_bgcolor="white",
-
-        paper_bgcolor="white",
-
-        showlegend=False
+        orientation="h"
     )
 
 
     st.plotly_chart(
-
         fig2,
-
         use_container_width=True
-
     )
